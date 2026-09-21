@@ -1,0 +1,12 @@
+{
+  "domain": "azure_storage_queue",
+  "name": "Azure Storage Queue",
+  "codeowners": ["@standsi"],
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/azure_storage_queue",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "quality_scale": "bronze",
+  "requirements": ["azure-storage-queue==12.17.0"],
+  "version": "1.0.0"
+}
