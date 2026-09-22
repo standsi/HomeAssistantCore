@@ -44,13 +44,17 @@ async def dequeue_message(queue_client: QueueClient) -> tuple[str, dict] | None:
         payload = json.loads(decoded_content)
     except binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError:
         _LOGGER.error("Queue message content is not valid JSON: %r", message.content)
-        return None
+        payload = None
 
     try:
         await queue_client.delete_message(message)
     except ResourceNotFoundError:
         # Message was already deleted/expired (e.g. visibility timeout elapsed).
         _LOGGER.warning("Message already removed from queue before it could be deleted")
+        return None
+
+    if payload is None:
+        # Malformed message: already removed above, nothing to report.
         return None
 
     return message.id, payload
