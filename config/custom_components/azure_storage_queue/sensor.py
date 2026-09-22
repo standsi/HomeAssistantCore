@@ -1,33 +1,48 @@
 """Template sensor for Azure Storage Queue integration."""
 
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import QueueClientConfigEntry
+from . import AzureStorageQueueConfigEntry
+from .coordinator import AzureStorageQueueCoordinator
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: QueueClientConfigEntry, async_add_entities
-):
+    hass: HomeAssistant,
+    entry: AzureStorageQueueConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up the sensor platform."""
     async_add_entities([AzureStorageQueueSensor(entry)])
-    return True
 
 
-class AzureStorageQueueSensor(SensorEntity):
-    """Represent an Azure Storage Queue as a Home Assistant sensor."""
+class AzureStorageQueueSensor(
+    CoordinatorEntity[AzureStorageQueueCoordinator], SensorEntity
+):
+    """Represent the last message dequeued from an Azure Storage Queue."""
 
-    def __init__(self, entry: QueueClientConfigEntry) -> None:
+    _attr_has_entity_name = True
+    _attr_translation_key = "queue_message"
+
+    def __init__(self, entry: AzureStorageQueueConfigEntry) -> None:
         """Initialize the Azure Storage Queue sensor."""
-        self._entry = entry
-        self._state = None
+        super().__init__(entry.runtime_data)
+        self._attr_unique_id = f"{entry.entry_id}_queue_message"
 
     @property
-    def name(self):
-        """Return the sensor name."""
-        return "Azure Storage Queue Sensor"
+    def native_value(self) -> str | None:
+        """Return the message text of the last dequeued item, truncated to fit a state."""
+        if self.coordinator.data is None:
+            return None
+        msg = self.coordinator.data.get("msg")
+        if isinstance(msg, str) and len(msg) > MAX_LENGTH_STATE_STATE:
+            return msg[: MAX_LENGTH_STATE_STATE - 3] + "..."
+        return msg
 
     @property
-    def state(self):
-        """Return the current sensor state."""
-        return self._state
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Return the last dequeued message's payload."""
+        return self.coordinator.data
