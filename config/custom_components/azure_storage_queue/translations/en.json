@@ -17,5 +17,12 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "queue_message": {
+        "name": "Last message"
+      }
+    }
   }
 }
