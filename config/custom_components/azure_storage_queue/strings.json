@@ -5,14 +5,17 @@
         "data": {
           "connstring": "Connection String",
           "acctname": "Account Name",
-          "queuename": "Queue Name"
+          "queuename": "Receive queue name",
+          "send_queuename": "Send queue name"
         }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "unknown": "[%key:common::config_flow::error::unknown%]",
+      "no_queue_configured": "At least one of receive queue name or send queue name must be set",
+      "same_queue_name": "Receive queue name and send queue name must be different"
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
@@ -22,6 +25,18 @@
     "sensor": {
       "queue_message": {
         "name": "Last message"
+      }
+    }
+  },
+  "services": {
+    "send_message": {
+      "name": "Send message",
+      "description": "Sends a message to the send queue configured for this entry.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "The text to send to the queue."
+        }
       }
     }
   }

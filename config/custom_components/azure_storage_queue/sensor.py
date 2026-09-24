@@ -31,7 +31,7 @@ class AzureStorageQueueSensor(
 
     def __init__(self, entry: AzureStorageQueueConfigEntry) -> None:
         """Initialize the Azure Storage Queue sensor."""
-        super().__init__(entry.runtime_data)
+        super().__init__(entry.runtime_data.coordinator)
         self._attr_unique_id = f"{entry.entry_id}_queue_message"
 
     @property

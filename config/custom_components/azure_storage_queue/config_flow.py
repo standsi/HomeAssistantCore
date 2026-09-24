@@ -8,7 +8,7 @@ import probatio
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.core import HomeAssistant
 
-from .const import ACCTNAME, CONNSTRING, DOMAIN, QUEUENAME
+from .const import ACCTNAME, CONNSTRING, DOMAIN, QUEUENAME, SEND_QUEUENAME
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,7 +16,8 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = probatio.Schema(
     {
         probatio.Required(CONNSTRING): str,
-        probatio.Required(QUEUENAME): str,
+        probatio.Optional(QUEUENAME): str,
+        probatio.Optional(SEND_QUEUENAME): str,
         probatio.Required(ACCTNAME): str,
     }
 )
@@ -42,6 +43,15 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
+    receive_queue = data.get(QUEUENAME)
+    send_queue = data.get(SEND_QUEUENAME)
+
+    if not receive_queue and not send_queue:
+        raise NoQueueConfigured
+
+    if receive_queue and send_queue and receive_queue == send_queue:
+        raise SameQueueName
+
     # TODO validate the data can be used to set up a connection.
 
     # If your PyPI package is not built with async, pass your methods
@@ -52,7 +62,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     hub = PlaceholderHub(data[CONNSTRING])
 
-    if not await hub.authenticate(data[ACCTNAME], data[QUEUENAME]):
+    if not await hub.authenticate(data[ACCTNAME], receive_queue or send_queue):
         raise InvalidAuth
 
     # If you cannot connect:
@@ -77,6 +87,10 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
+            except NoQueueConfigured:
+                errors["base"] = "no_queue_configured"
+            except SameQueueName:
+                errors["base"] = "same_queue_name"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -98,3 +112,11 @@ class CannotConnect(Exception):
 
 class InvalidAuth(Exception):
     """Error to indicate there is invalid auth."""
+
+
+class NoQueueConfigured(Exception):
+    """Error to indicate neither a receive nor a send queue name was given."""
+
+
+class SameQueueName(Exception):
+    """Error to indicate the receive and send queue names are the same."""

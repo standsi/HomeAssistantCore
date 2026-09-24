@@ -1,0 +1,12 @@
+# Describes the format for available Azure Storage Queue services
+
+send_message:
+  target:
+    device:
+      integration: azure_storage_queue
+  fields:
+    message:
+      required: true
+      example: "hello queue"
+      selector:
+        text:

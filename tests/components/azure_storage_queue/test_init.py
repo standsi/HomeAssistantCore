@@ -16,10 +16,12 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
     ConfigEntryNotReady,
+    ServiceValidationError,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.util.dt import utcnow
 
-from tests.common import async_capture_events, async_fire_time_changed
+from tests.common import MockConfigEntry, async_capture_events, async_fire_time_changed
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -149,3 +151,112 @@ async def test_long_message_is_truncated(
     state = hass.states.async_all("sensor")[0]
     assert len(state.state) == 255
     assert state.state.endswith("...")
+
+
+async def test_send_only_entry_has_no_sensor(
+    hass: HomeAssistant, mock_queue_client
+) -> None:
+    """Test an entry with only a send queue creates no sensor entity."""
+    from custom_components.azure_storage_queue.const import DOMAIN  # noqa: PLC0415
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "connstring": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key",
+            "send_queuename": "outbox",
+            "acctname": "test",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.async_all("sensor") == []
+    assert entry.runtime_data.coordinator is None
+    assert entry.runtime_data.send_queue_client is mock_queue_client
+
+
+async def test_send_message_service(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test the send_message service enqueues a message onto the device's entry."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SEND_QUEUENAME,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, SEND_QUEUENAME: "outbox"},
+    )
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    assert device is not None
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+        {"device_id": device.id, "message": "hello"},
+        blocking=True,
+    )
+
+    mock_queue_client.send_message.assert_awaited_once()
+
+
+async def test_send_message_service_unknown_device(
+    hass: HomeAssistant, mock_config_entry, mock_queue_client
+) -> None:
+    """Test the send_message service rejects an unknown device."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"device_id": "unknown-device", "message": "hello"},
+            blocking=True,
+        )
+
+
+async def test_send_message_service_no_send_queue(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test the send_message service rejects an entry without a send queue."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    assert device is not None
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"device_id": device.id, "message": "hello"},
+            blocking=True,
+        )
