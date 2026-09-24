@@ -1,5 +1,7 @@
 """Template sensor for Azure Storage Queue integration."""
 
+import json
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
@@ -37,7 +39,7 @@ class AzureStorageQueueSensor(
         """Return the message text of the last dequeued item, truncated to fit a state."""
         if self.coordinator.data is None:
             return None
-        msg = self.coordinator.data.get("msg")
+        msg = json.dumps(self.coordinator.data)  # self.coordinator.data.get("msg")
         if isinstance(msg, str) and len(msg) > MAX_LENGTH_STATE_STATE:
             return msg[: MAX_LENGTH_STATE_STATE - 3] + "..."
         return msg
