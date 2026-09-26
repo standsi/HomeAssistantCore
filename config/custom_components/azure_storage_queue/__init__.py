@@ -34,7 +34,7 @@ _PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _SEND_MESSAGE_SCHEMA = probatio.Schema(
     {
-        probatio.Required(ATTR_DEVICE_ID): cv.string,
+        probatio.Optional(ATTR_DEVICE_ID): cv.string,
         probatio.Required(ATTR_MESSAGE): cv.string,
     }
 )
@@ -77,19 +77,41 @@ async def _async_create_queue_client(connstring: str, queue_name: str) -> QueueC
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register Azure Storage Queue services."""
 
-    async def async_handle_send_message(call: ServiceCall) -> None:
-        """Send a message to the send queue of the targeted device's entry."""
-        device_id = call.data[ATTR_DEVICE_ID]
-        device = dr.async_get(hass).async_get(device_id)
-        if device is None:
-            raise ServiceValidationError(f"Device '{device_id}' not found")
+    def _async_get_target_entry(device_id: str | None) -> AzureStorageQueueConfigEntry:
+        """Resolve the entry to send on, from an explicit device or the sole candidate."""
+        if device_id is not None:
+            device = dr.async_get(hass).async_get(device_id)
+            if device is None:
+                raise ServiceValidationError(f"Device '{device_id}' not found")
 
-        entry_id = next(iter(device.config_entries), None)
-        entry = hass.config_entries.async_get_entry(entry_id) if entry_id else None
-        if entry is None or entry.domain != DOMAIN:
+            entry_id = next(iter(device.config_entries), None)
+            entry = hass.config_entries.async_get_entry(entry_id) if entry_id else None
+            if entry is None or entry.domain != DOMAIN:
+                raise ServiceValidationError(
+                    f"Device '{device_id}' is not an Azure Storage Queue device"
+                )
+            return entry
+
+        candidates = [
+            entry
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry.state is ConfigEntryState.LOADED
+            and entry.runtime_data.send_queue_client is not None
+        ]
+        if not candidates:
             raise ServiceValidationError(
-                f"Device '{device_id}' is not an Azure Storage Queue device"
+                "No Azure Storage Queue entry has a send queue configured"
             )
+        if len(candidates) > 1:
+            raise ServiceValidationError(
+                "Multiple Azure Storage Queue entries have a send queue configured; "
+                "target a device to disambiguate"
+            )
+        return candidates[0]
+
+    async def async_handle_send_message(call: ServiceCall) -> None:
+        """Send a message to the send queue of the targeted (or sole) entry."""
+        entry = _async_get_target_entry(call.data.get(ATTR_DEVICE_ID))
         if entry.state is not ConfigEntryState.LOADED:
             raise ServiceValidationError(f"Entry '{entry.title}' is not loaded")
 
@@ -162,4 +184,3 @@ async def async_unload_entry(
         if entry.runtime_data.send_queue_client:
             await entry.runtime_data.send_queue_client.close()
     return unload_ok
-

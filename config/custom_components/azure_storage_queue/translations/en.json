@@ -31,7 +31,7 @@
   "services": {
     "send_message": {
       "name": "Send message",
-      "description": "Sends a message to the send queue configured for this entry.",
+      "description": "Sends a message to a send queue. The target device can be omitted if only one entry has a send queue configured.",
       "fields": {
         "message": {
           "name": "Message",
