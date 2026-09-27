@@ -28,7 +28,7 @@ async def test_form(hass: HomeAssistant) -> None:
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Name of the device"
+    assert result["title"] == "test: messages"
     assert result["data"] == MOCK_CONFIG
 
 

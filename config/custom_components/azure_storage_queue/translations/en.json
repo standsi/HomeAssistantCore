@@ -31,11 +31,15 @@
   "services": {
     "send_message": {
       "name": "Send message",
-      "description": "Sends a message to a send queue. The target device can be omitted if only one entry has a send queue configured.",
+      "description": "Sends a message to the selected Azure Storage Queue send queue.",
       "fields": {
+        "config_entry_id": {
+          "name": "Queue configuration",
+          "description": "The Azure Storage Queue configuration whose send queue will receive the message."
+        },
         "message": {
           "name": "Message",
-          "description": "The text to send to the queue."
+          "description": "The text to send to the queue. Use a Jinja template that renders to a dict or list to send structured JSON instead of plain text."
         }
       }
     }

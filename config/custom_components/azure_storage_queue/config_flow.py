@@ -70,8 +70,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     # If the authentication is wrong:
     # InvalidAuth
 
-    # Return info that you want to store in the config entry.
-    return {"title": "Name of the device"}
+    queue_name = send_queue or receive_queue
+    return {"title": f"{data[ACCTNAME]}: {queue_name}"}
 
 
 class ConfigFlow(ConfigFlow, domain=DOMAIN):

@@ -13,7 +13,7 @@ from azure.storage.queue.aio import QueueClient
 import probatio
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import ATTR_DEVICE_ID, Platform
+from homeassistant.const import ATTR_CONFIG_ENTRY_ID, ATTR_DEVICE_ID, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
@@ -24,7 +24,14 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
-from .const import ATTR_MESSAGE, DOMAIN, QUEUENAME, SEND_QUEUENAME, SERVICE_SEND_MESSAGE
+from .const import (
+    ACCTNAME,
+    ATTR_MESSAGE,
+    DOMAIN,
+    QUEUENAME,
+    SEND_QUEUENAME,
+    SERVICE_SEND_MESSAGE,
+)
 from .coordinator import AzureStorageQueueCoordinator
 from .enqueue_message import enqueue_message
 
@@ -34,8 +41,11 @@ _PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _SEND_MESSAGE_SCHEMA = probatio.Schema(
     {
+        probatio.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
         probatio.Optional(ATTR_DEVICE_ID): cv.string,
-        probatio.Required(ATTR_MESSAGE): cv.string,
+        # Accept any JSON-serializable value as-is; cv.string would mangle
+        # rendered dicts/lists into their Python repr instead of JSON.
+        probatio.Required(ATTR_MESSAGE): object,
     }
 )
 
@@ -77,8 +87,18 @@ async def _async_create_queue_client(connstring: str, queue_name: str) -> QueueC
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register Azure Storage Queue services."""
 
-    def _async_get_target_entry(device_id: str | None) -> AzureStorageQueueConfigEntry:
-        """Resolve the entry to send on, from an explicit device or the sole candidate."""
+    def _async_get_target_entry(
+        config_entry_id: str | None, device_id: str | None
+    ) -> AzureStorageQueueConfigEntry:
+        """Resolve the target entry or the sole configured send queue."""
+        if config_entry_id is not None:
+            entry = hass.config_entries.async_get_entry(config_entry_id)
+            if entry is None or entry.domain != DOMAIN:
+                raise ServiceValidationError(
+                    f"Config entry '{config_entry_id}' is not an Azure Storage Queue entry"
+                )
+            return entry
+
         if device_id is not None:
             device = dr.async_get(hass).async_get(device_id)
             if device is None:
@@ -111,7 +131,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     async def async_handle_send_message(call: ServiceCall) -> None:
         """Send a message to the send queue of the targeted (or sole) entry."""
-        entry = _async_get_target_entry(call.data.get(ATTR_DEVICE_ID))
+        entry = _async_get_target_entry(
+            call.data.get(ATTR_CONFIG_ENTRY_ID), call.data.get(ATTR_DEVICE_ID)
+        )
         if entry.state is not ConfigEntryState.LOADED:
             raise ServiceValidationError(f"Entry '{entry.title}' is not loaded")
 
@@ -121,7 +143,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 f"Entry '{entry.title}' does not have a send queue configured"
             )
 
-        await enqueue_message(send_queue_client, {"msg": call.data[ATTR_MESSAGE]})
+        await enqueue_message(send_queue_client, {"data": call.data[ATTR_MESSAGE]})
 
     hass.services.async_register(
         DOMAIN,
@@ -160,11 +182,17 @@ async def async_setup_entry(
         coordinator=coordinator, send_queue_client=send_queue_client
     )
 
+    target_queue_name = send_queue_name or receive_queue_name
+    if entry.title == "Name of the device":
+        hass.config_entries.async_update_entry(
+            entry, title=f"{entry.data[ACCTNAME]}: {target_queue_name}"
+        )
+
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
-        name=entry.title,
+        name=f"{entry.data[ACCTNAME]}: {target_queue_name}",
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
