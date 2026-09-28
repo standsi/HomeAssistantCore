@@ -89,6 +89,9 @@ async def test_message_updates_sensor(
     import json  # noqa: PLC0415
 
     from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        ATTR_CONFIG_ENTRY_ID,
+        ATTR_RECEIVE_QUEUE_NAME,
+        ATTR_SOURCE_METADATA,
         EVENT_AZURE_STORAGE_QUEUE,
         SCAN_INTERVAL,
     )
@@ -108,7 +111,12 @@ async def test_message_updates_sensor(
     assert state.state == json.dumps(payload)
     assert state.attributes["value"] == 1
     assert len(events) == 1
-    assert events[0].data == payload
+    assert events[0].data["msg"] == payload["msg"]
+    assert events[0].data["value"] == payload["value"]
+    assert events[0].data[ATTR_SOURCE_METADATA] == {
+        ATTR_CONFIG_ENTRY_ID: mock_config_entry.entry_id,
+        ATTR_RECEIVE_QUEUE_NAME: mock_config_entry.data["queuename"],
+    }
 
 
 async def test_duplicate_message_is_ignored(
