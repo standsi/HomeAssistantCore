@@ -42,5 +42,6 @@ def mock_queue_client() -> Generator[MagicMock]:
         client.get_queue_properties = AsyncMock()
         client.receive_message = AsyncMock(return_value=None)
         client.delete_message = AsyncMock()
+        client.send_message = AsyncMock()
         client.close = AsyncMock()
         yield client

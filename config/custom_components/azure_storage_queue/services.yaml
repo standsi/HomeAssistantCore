@@ -1,0 +1,15 @@
+# Describes the format for available Azure Storage Queue services
+
+send_message:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: azure_storage_queue
+    message:
+      required: true
+      example: "hello queue"
+      selector:
+        text:
+          multiline: true

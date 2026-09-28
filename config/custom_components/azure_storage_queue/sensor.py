@@ -31,7 +31,7 @@ class AzureStorageQueueSensor(
 
     def __init__(self, entry: AzureStorageQueueConfigEntry) -> None:
         """Initialize the Azure Storage Queue sensor."""
-        super().__init__(entry.runtime_data)
+        super().__init__(entry.runtime_data.coordinator)
         self._attr_unique_id = f"{entry.entry_id}_queue_message"
 
     @property
@@ -39,7 +39,7 @@ class AzureStorageQueueSensor(
         """Return the message text of the last dequeued item, truncated to fit a state."""
         if self.coordinator.data is None:
             return None
-        msg = json.dumps(self.coordinator.data)  # self.coordinator.data.get("msg")
+        msg = json.dumps(self.coordinator.data)
         if isinstance(msg, str) and len(msg) > MAX_LENGTH_STATE_STATE:
             return msg[: MAX_LENGTH_STATE_STATE - 3] + "..."
         return msg

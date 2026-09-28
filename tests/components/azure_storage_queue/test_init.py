@@ -16,10 +16,12 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
     ConfigEntryNotReady,
+    ServiceValidationError,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.util.dt import utcnow
 
-from tests.common import async_capture_events, async_fire_time_changed
+from tests.common import MockConfigEntry, async_capture_events, async_fire_time_changed
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -84,6 +86,8 @@ async def test_message_updates_sensor(
     hass: HomeAssistant, mock_config_entry, mock_queue_client
 ) -> None:
     """Test a dequeued message updates the sensor and fires an event."""
+    import json  # noqa: PLC0415
+
     from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
         EVENT_AZURE_STORAGE_QUEUE,
         SCAN_INTERVAL,
@@ -101,7 +105,7 @@ async def test_message_updates_sensor(
         await hass.async_block_till_done()
 
     state = hass.states.async_all("sensor")[0]
-    assert state.state == "hello"
+    assert state.state == json.dumps(payload)
     assert state.attributes["value"] == 1
     assert len(events) == 1
     assert events[0].data == payload
@@ -111,6 +115,8 @@ async def test_duplicate_message_is_ignored(
     hass: HomeAssistant, mock_config_entry, mock_queue_client
 ) -> None:
     """Test duplicate message IDs do not fire duplicate events."""
+    import json  # noqa: PLC0415
+
     from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
         EVENT_AZURE_STORAGE_QUEUE,
         SCAN_INTERVAL,
@@ -130,7 +136,7 @@ async def test_duplicate_message_is_ignored(
         await hass.async_block_till_done()
 
     state = hass.states.async_all("sensor")[0]
-    assert state.state == "hello"
+    assert state.state == json.dumps(payload)
     assert len(events) == 1
 
 
@@ -149,3 +155,254 @@ async def test_long_message_is_truncated(
     state = hass.states.async_all("sensor")[0]
     assert len(state.state) == 255
     assert state.state.endswith("...")
+
+
+async def test_send_only_entry_has_no_sensor(
+    hass: HomeAssistant, mock_queue_client
+) -> None:
+    """Test an entry with only a send queue creates no sensor entity."""
+    from custom_components.azure_storage_queue.const import DOMAIN  # noqa: PLC0415
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "connstring": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key",
+            "send_queuename": "outbox",
+            "acctname": "test",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.async_all("sensor") == []
+    assert entry.runtime_data.coordinator is None
+    assert entry.runtime_data.send_queue_client is mock_queue_client
+
+
+async def test_send_message_service(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test the send_message service enqueues a message onto the device's entry."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SEND_QUEUENAME,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, SEND_QUEUENAME: "outbox"},
+    )
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    assert device is not None
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+        {"config_entry_id": mock_config_entry.entry_id, "message": "hello"},
+        blocking=True,
+    )
+
+    mock_queue_client.send_message.assert_awaited_once()
+
+
+async def test_send_message_service_structured_message(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test a dict message is enqueued as JSON, not its Python repr."""
+    import base64  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SEND_QUEUENAME,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, SEND_QUEUENAME: "outbox"},
+    )
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    assert device is not None
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+        {"device_id": device.id, "message": {"time": "2026-09-25 21:20:31"}},
+        blocking=True,
+    )
+
+    sent_content = mock_queue_client.send_message.call_args[0][0]
+    decoded = json.loads(base64.b64decode(sent_content))
+    assert decoded == {"data": {"time": "2026-09-25 21:20:31"}}
+
+
+async def test_send_message_service_unknown_device(
+    hass: HomeAssistant, mock_config_entry, mock_queue_client
+) -> None:
+    """Test the send_message service rejects an unknown device."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"device_id": "unknown-device", "message": "hello"},
+            blocking=True,
+        )
+
+
+async def test_send_message_service_no_send_queue(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test the send_message service rejects an entry without a send queue."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    assert device is not None
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"device_id": device.id, "message": "hello"},
+            blocking=True,
+        )
+
+
+async def test_send_message_service_no_device_id_single_entry(
+    hass: HomeAssistant, mock_config_entry, mock_queue_client
+) -> None:
+    """Test the service auto-resolves the sole entry with a send queue configured."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SEND_QUEUENAME,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, SEND_QUEUENAME: "outbox"},
+    )
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+        {"message": "hello"},
+        blocking=True,
+    )
+
+    mock_queue_client.send_message.assert_awaited_once()
+
+
+async def test_send_message_service_no_device_id_no_send_queue(
+    hass: HomeAssistant, mock_config_entry, mock_queue_client
+) -> None:
+    """Test the service rejects an omitted device when no entry has a send queue."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"message": "hello"},
+            blocking=True,
+        )
+
+
+async def test_send_message_service_no_device_id_ambiguous(
+    hass: HomeAssistant,
+    mock_config_entry,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test the service rejects an omitted device when multiple entries qualify."""
+    from custom_components.azure_storage_queue.const import (  # noqa: PLC0415
+        DOMAIN,
+        SEND_QUEUENAME,
+        SERVICE_SEND_MESSAGE,
+    )
+
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, SEND_QUEUENAME: "outbox"},
+        title="Name of the device",
+    )
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Name of the device",
+        data={
+            "connstring": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key",
+            "send_queuename": "outbox2",
+            "acctname": "test",
+        },
+    )
+    other_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    first_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, mock_config_entry.entry_id), mock_config_entry.entry_id
+    )
+    second_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, other_entry.entry_id), other_entry.entry_id
+    )
+    assert first_device is not None
+    assert second_device is not None
+    assert first_device.name == "test: outbox"
+    assert second_device.name == "test: outbox2"
+    assert mock_config_entry.title == "test: outbox"
+    assert other_entry.title == "test: outbox2"
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SEND_MESSAGE,
+            {"message": "hello"},
+            blocking=True,
+        )
