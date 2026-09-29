@@ -52,6 +52,14 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     if receive_queue and send_queue and receive_queue == send_queue:
         raise SameQueueName
 
+    if receive_queue:
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if (
+                entry.data.get(CONNSTRING) == data[CONNSTRING]
+                and entry.data.get(QUEUENAME) == receive_queue
+            ):
+                raise DuplicateReceiveQueueConfigured
+
     # TODO validate the data can be used to set up a connection.
 
     # If your PyPI package is not built with async, pass your methods
@@ -70,7 +78,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     # If the authentication is wrong:
     # InvalidAuth
 
-    queue_name = send_queue or receive_queue
+    if send_queue and receive_queue:
+        queue_name = f"{send_queue} / {receive_queue}"
+    else:
+        queue_name = send_queue or receive_queue
+
     return {"title": f"{data[ACCTNAME]}: {queue_name}"}
 
 
@@ -91,6 +103,8 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "no_queue_configured"
             except SameQueueName:
                 errors["base"] = "same_queue_name"
+            except DuplicateReceiveQueueConfigured:
+                errors["base"] = "duplicate_receive_queue"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -120,3 +134,7 @@ class NoQueueConfigured(Exception):
 
 class SameQueueName(Exception):
     """Error to indicate the receive and send queue names are the same."""
+
+
+class DuplicateReceiveQueueConfigured(Exception):
+    """Error to indicate a receive queue is already configured for this account."""

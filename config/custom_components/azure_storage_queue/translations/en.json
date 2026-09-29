@@ -8,7 +8,8 @@
       "invalid_auth": "Invalid authentication",
       "unknown": "Unexpected error",
       "no_queue_configured": "At least one of receive queue name or send queue name must be set",
-      "same_queue_name": "Receive queue name and send queue name must be different"
+      "same_queue_name": "Receive queue name and send queue name must be different",
+      "duplicate_receive_queue": "A configuration for this account already uses that receive queue name"
     },
     "step": {
       "user": {

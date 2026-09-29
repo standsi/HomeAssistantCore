@@ -15,7 +15,8 @@
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "unknown": "[%key:common::config_flow::error::unknown%]",
       "no_queue_configured": "At least one of receive queue name or send queue name must be set",
-      "same_queue_name": "Receive queue name and send queue name must be different"
+      "same_queue_name": "Receive queue name and send queue name must be different",
+      "duplicate_receive_queue": "A configuration for this account already uses that receive queue name"
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"

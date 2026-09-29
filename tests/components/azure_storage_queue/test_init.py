@@ -189,6 +189,37 @@ async def test_send_only_entry_has_no_sensor(
     assert entry.runtime_data.send_queue_client is mock_queue_client
 
 
+async def test_combined_entry_default_name_uses_both_queues(
+    hass: HomeAssistant,
+    mock_queue_client,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Test combined send+receive entries use a distinct default display name."""
+    from custom_components.azure_storage_queue.const import DOMAIN  # noqa: PLC0415
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Name of the device",
+        data={
+            "connstring": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key",
+            "queuename": "inbox",
+            "send_queuename": "outbox",
+            "acctname": "test",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, entry.entry_id), entry.entry_id
+    )
+    assert device is not None
+    assert entry.title == "test: outbox / inbox"
+    assert device.name == "test: outbox / inbox"
+
+
 async def test_send_message_service(
     hass: HomeAssistant,
     mock_config_entry,
@@ -402,9 +433,9 @@ async def test_send_message_service_no_device_id_ambiguous(
     )
     assert first_device is not None
     assert second_device is not None
-    assert first_device.name == "test: outbox"
+    assert first_device.name == "test: outbox / messages"
     assert second_device.name == "test: outbox2"
-    assert mock_config_entry.title == "test: outbox"
+    assert mock_config_entry.title == "test: outbox / messages"
     assert other_entry.title == "test: outbox2"
 
     with pytest.raises(ServiceValidationError):
