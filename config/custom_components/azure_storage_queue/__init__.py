@@ -1,6 +1,7 @@
 """The Azure Storage Queue integration."""
 
 from dataclasses import dataclass
+import logging
 
 # get the queue client
 from azure.core.exceptions import (
@@ -27,6 +28,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     ACCTNAME,
     ATTR_MESSAGE,
+    CONNSTRING,
     DOMAIN,
     QUEUENAME,
     SEND_QUEUENAME,
@@ -34,6 +36,8 @@ from .const import (
 )
 from .coordinator import AzureStorageQueueCoordinator
 from .enqueue_message import enqueue_message
+
+_LOGGER = logging.getLogger(__name__)
 
 # List the platforms that you want to support.
 # For your initial PR, limit it to 1 platform.
@@ -60,6 +64,17 @@ class AzureStorageQueueData:
 
 # Create ConfigEntry type alias with API object
 type AzureStorageQueueConfigEntry = ConfigEntry[AzureStorageQueueData]
+
+
+def _build_display_name(
+    account_name: str, send_queue_name: str | None, receive_queue_name: str | None
+) -> str:
+    """Build a user-facing name for this queue configuration."""
+    if send_queue_name and receive_queue_name:
+        queue_part = f"{send_queue_name} / {receive_queue_name}"
+    else:
+        queue_part = send_queue_name or receive_queue_name
+    return f"{account_name}: {queue_part}"
 
 
 async def _async_create_queue_client(connstring: str, queue_name: str) -> QueueClient:
@@ -163,6 +178,25 @@ async def async_setup_entry(
     connstring = entry.data["connstring"]
     receive_queue_name = entry.data.get(QUEUENAME)
     send_queue_name = entry.data.get(SEND_QUEUENAME)
+    display_name = _build_display_name(
+        entry.data[ACCTNAME], send_queue_name, receive_queue_name
+    )
+
+    if receive_queue_name:
+        for other_entry in hass.config_entries.async_entries(DOMAIN):
+            if other_entry.entry_id == entry.entry_id:
+                continue
+            if (
+                other_entry.data.get(CONNSTRING) == connstring
+                and other_entry.data.get(QUEUENAME) == receive_queue_name
+            ):
+                _LOGGER.warning(
+                    "Entry '%s' shares the same receive queue '%s' as entry '%s'; "
+                    "messages may be consumed by either entry",
+                    entry.title,
+                    receive_queue_name,
+                    other_entry.title,
+                )
 
     coordinator: AzureStorageQueueCoordinator | None = None
     platforms: list[Platform] = []
@@ -182,17 +216,14 @@ async def async_setup_entry(
         coordinator=coordinator, send_queue_client=send_queue_client
     )
 
-    target_queue_name = send_queue_name or receive_queue_name
     if entry.title == "Name of the device":
-        hass.config_entries.async_update_entry(
-            entry, title=f"{entry.data[ACCTNAME]}: {target_queue_name}"
-        )
+        hass.config_entries.async_update_entry(entry, title=display_name)
 
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
-        name=f"{entry.data[ACCTNAME]}: {target_queue_name}",
+        name=display_name,
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)

@@ -13,7 +13,15 @@ from azure.storage.queue.aio import QueueClient
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, EVENT_AZURE_STORAGE_QUEUE, SCAN_INTERVAL
+from .const import (
+    ATTR_CONFIG_ENTRY_ID,
+    ATTR_RECEIVE_QUEUE_NAME,
+    ATTR_SOURCE_METADATA,
+    DOMAIN,
+    EVENT_AZURE_STORAGE_QUEUE,
+    QUEUENAME,
+    SCAN_INTERVAL,
+)
 from .dequeue_message import dequeue_message
 
 if TYPE_CHECKING:
@@ -71,5 +79,12 @@ class AzureStorageQueueCoordinator(DataUpdateCoordinator[dict | None]):
             return self.data
 
         self._last_message_id = message_id
-        self.hass.bus.async_fire(EVENT_AZURE_STORAGE_QUEUE, payload)
+        event_data = {
+            **payload,
+            ATTR_SOURCE_METADATA: {
+                ATTR_CONFIG_ENTRY_ID: self.config_entry.entry_id,
+                ATTR_RECEIVE_QUEUE_NAME: self.config_entry.data[QUEUENAME],
+            },
+        }
+        self.hass.bus.async_fire(EVENT_AZURE_STORAGE_QUEUE, event_data)
         return payload
